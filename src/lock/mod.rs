@@ -1,5 +1,4 @@
 mod sqlx;
-pub use sqlx::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -21,8 +20,10 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub trait Locker {
+    #[cfg(any(feature = "sqlx-mysql", feature = "sqlx-postgres"))]
     type DB: ::sqlx::Database;
 
+    #[cfg(any(feature = "sqlx-mysql", feature = "sqlx-postgres"))]
     fn with_locking<T, F>(
         pool: &::sqlx::Pool<Self::DB>,
         key: &str,

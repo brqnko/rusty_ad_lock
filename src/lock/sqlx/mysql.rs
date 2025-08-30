@@ -43,7 +43,7 @@ impl Locker for MySqlLocker {
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions::{assert_matches};
+    use pretty_assertions::assert_matches;
     use std::time::Duration;
     use tokio::time::sleep;
 
@@ -73,9 +73,7 @@ mod tests {
         );
 
         match (&r1, &r2) {
-            (Ok(()), Err(_)) | (Err(_), Ok(())) => {
-                ()
-            }
+            (Ok(()), Err(_)) | (Err(_), Ok(())) => (),
             other => panic!("expected one Ok and one FailedToGetLock, got: {:?}", other),
         }
 
@@ -83,8 +81,7 @@ mod tests {
             &pool,
             "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
             Duration::from_secs(1).into(),
-            async |_| {
-            },
+            async |_| {},
         )
         .await;
 
@@ -142,9 +139,7 @@ mod tests {
         );
 
         match (&r1, &r2) {
-            (Ok(()), Err(_)) | (Err(_), Ok(())) => {
-                ()
-            }
+            (Ok(()), Err(_)) | (Err(_), Ok(())) => (),
             other => panic!("expected one Ok and one FailedToGetLock, got: {:?}", other),
         }
 
@@ -152,8 +147,7 @@ mod tests {
             &pool,
             "LjoiSBmBcdKIng3aBIsf0Yqi8oeTKH1UkRQHfKlFe5fBsDYjhRDEwOwtSUr8ewG3",
             Duration::from_secs(1).into(),
-            async |_| {
-            },
+            async |_| {},
         )
         .await;
 

@@ -33,7 +33,7 @@
             ];
             packages = with pkgs; [
               mariadb
-              postgresql_16
+              postgresql
             ];
             shellHook = ''
             '';

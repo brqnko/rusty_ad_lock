@@ -16,24 +16,32 @@ impl Locker for PostgresLocker {
     {
         let mut tx = pool.begin().await?;
 
-        let timeout = timeout.unwrap_or_default().as_secs() as i32;
-        let signal: Option<i32> = sqlx::query_scalar("SELECT GET_LOCK(?,?)")
-            .bind(key)
-            .bind(timeout)
-            .fetch_optional(&mut *tx)
-            .await?;
+        match timeout {
+            Some(timeout) => {
+                sqlx::query(&format!("SET LOCAL lock_timeout = {}", timeout.as_millis()))
+                    .execute(&mut *tx)
+                    .await?;
 
-        match signal {
-            Some(1) => Ok(()),
-            Some(0) => Err(Error::FailedToGetLock(key.to_string())),
-            _ => Ok(())
-            // Some(signal) => Err(Error::MySqlUnknownSignal(signal)),
-            // None => Err(Error::MySqlReturnedNull),
-        }?;
+                sqlx::query("SELECT pg_advisory_lock(hashtext($1))")
+                    .bind(key)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            None => {
+                let b: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock(hashtext($1))")
+                    .bind(key)
+                    .fetch_one(&mut *tx)
+                    .await?;
+
+                if !b {
+                    return Err(Error::FailedToGetLock(key.to_string()));
+                }
+            }
+        }
 
         f(&mut tx).await;
 
-        sqlx::query("DO RELEASE_LOCK(?)")
+        sqlx::query("SELECT pg_advisory_unlock(hashtext($1))")
             .bind(key)
             .fetch_optional(&mut *tx)
             .await?;
@@ -44,7 +52,7 @@ impl Locker for PostgresLocker {
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions::{assert_matches};
+    use pretty_assertions::assert_matches;
     use std::time::Duration;
     use tokio::time::sleep;
 
@@ -74,9 +82,7 @@ mod tests {
         );
 
         match (&r1, &r2) {
-            (Ok(()), Err(_)) | (Err(_), Ok(())) => {
-                ()
-            }
+            (Ok(()), Err(_)) | (Err(_), Ok(())) => (),
             other => panic!("expected one Ok and one FailedToGetLock, got: {:?}", other),
         }
 
@@ -84,8 +90,7 @@ mod tests {
             &pool,
             "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
             Duration::from_secs(1).into(),
-            async |_| {
-            },
+            async |_| {},
         )
         .await;
 
@@ -143,9 +148,7 @@ mod tests {
         );
 
         match (&r1, &r2) {
-            (Ok(()), Err(_)) | (Err(_), Ok(())) => {
-                ()
-            }
+            (Ok(()), Err(_)) | (Err(_), Ok(())) => (),
             other => panic!("expected one Ok and one FailedToGetLock, got: {:?}", other),
         }
 
@@ -153,8 +156,7 @@ mod tests {
             &pool,
             "LjoiSBmBcdKIng3aBIsf0Yqi8oeTKH1UkRQHfKlFe5fBsDYjhRDEwOwtSUr8ewG3",
             Duration::from_secs(1).into(),
-            async |_| {
-            },
+            async |_| {},
         )
         .await;
 
@@ -165,12 +167,13 @@ mod tests {
 
     #[sqlx::test]
     async fn locck_with_empty_text(pool: PgPool) -> sqlx::Result<()> {
-        let r = PostgresLocker::with_locking(&pool, "", Duration::from_secs(1).into(), async |_| {
-            sleep(Duration::from_secs(1)).await;
-        })
-        .await;
+        let r =
+            PostgresLocker::with_locking(&pool, "", Duration::from_secs(1).into(), async |_| {
+                sleep(Duration::from_secs(1)).await;
+            })
+            .await;
 
-        assert_matches!(r, Err(_));
+        assert_matches!(r, Ok(_));
 
         Ok(())
     }
