@@ -1,35 +1,49 @@
-use crate::Locker;
-use crate::lock::LockerGuard;
-use crate::lock::Result;
+use crate::{Error, Locker};
 
 pub struct MySqlLocker;
 
 impl Locker for MySqlLocker {
-    type DB = sqlx::mysql::MySql;
+    type DB = ::sqlx::MySql;
 
-    async fn lock<'s, 'p>(
+    async fn with_locking<T, F>(
         pool: &sqlx::Pool<Self::DB>,
-        text: &str,
+        key: &str,
         timeout: Option<std::time::Duration>,
-    ) -> Result<Option<LockerGuard<'s, 'p, Self::DB>>> {
+        f: F,
+    ) -> crate::Result<()>
+    where
+        F: AsyncFnOnce(&mut ::sqlx::Transaction<'static, Self::DB>) -> T,
+    {
+        let mut tx = pool.begin().await?;
+
         let timeout = timeout.unwrap_or_default().as_secs();
-        let a: Option<i32> = sqlx::query_scalar("SELECT GET_LOCK($1,$2);")
-            .bind(text)
+        let signal: Option<i32> = sqlx::query_scalar("SELECT GET_LOCK(?,?)")
+            .bind(key)
             .bind(timeout)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await?;
 
-        todo!()
-    }
+        match signal {
+            Some(1) => Ok(()),
+            Some(0) => Err(Error::FailedToGetLock(key.to_string())),
+            Some(signal) => Err(Error::MySqlUnknownSignal(signal)),
+            None => Err(Error::MySqlReturnedNull),
+        }?;
 
-    async fn unlock(pool: &sqlx::Pool<Self::DB>, text: &str) -> Result<()> {
-        todo!()
+        f(&mut tx).await;
+
+        sqlx::query("DO RELEASE_LOCK(?)")
+            .bind(key)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions::{assert_matches, assert_str_eq};
+    use pretty_assertions::{assert_matches};
     use std::time::Duration;
     use tokio::time::sleep;
 
@@ -38,86 +52,142 @@ mod tests {
     use sqlx::MySqlPool;
 
     #[sqlx::test]
-    async fn lock_and_await(pool: MySqlPool) -> sqlx::Result<()> {
-        // lock with 64 character with 1 sec
-        let guard = MySqlLocker::lock(
-            &pool,
-            "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
-            Some(Duration::from_secs(1)),
-        )
-        .await;
-        assert_matches!(&guard, Ok(Some(_)),);
-        assert_str_eq!(
-            guard.unwrap().unwrap().text,
-            "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB"
-        );
-
-        // lock again with same key within 1 sec
-        assert_matches!(
-            MySqlLocker::lock(
+    async fn different_sessions_cannot_acquire_the_same_lock(pool: MySqlPool) -> sqlx::Result<()> {
+        let (r1, r2) = tokio::join!(
+            MySqlLocker::with_locking(
                 &pool,
                 "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
-                Some(Duration::from_secs(1))
+                Duration::from_secs(1).into(),
+                async |_| {
+                    sleep(Duration::from_secs(2)).await;
+                },
+            ),
+            MySqlLocker::with_locking(
+                &pool,
+                "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
+                Duration::from_secs(1).into(),
+                async |_| {
+                    sleep(Duration::from_secs(2)).await;
+                },
             )
-            .await,
-            Ok(None),
         );
 
-        sleep(Duration::from_secs(1)).await;
+        match (&r1, &r2) {
+            (Ok(()), Err(_)) | (Err(_), Ok(())) => {
+                ()
+            }
+            other => panic!("expected one Ok and one FailedToGetLock, got: {:?}", other),
+        }
 
-        // lock again with same key after 1 sec
-        let guard = MySqlLocker::lock(
+        let r = MySqlLocker::with_locking(
             &pool,
             "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
-            Some(Duration::from_secs(1)),
+            Duration::from_secs(1).into(),
+            async |_| {
+            },
         )
         .await;
-        assert_matches!(&guard, Ok(Some(_)),);
-        let guard = guard.unwrap().unwrap();
-        assert_str_eq!(
-            guard.text,
-            "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB"
+
+        assert_matches!(r, Ok(()));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn second_waits_then_acquires(pool: MySqlPool) -> sqlx::Result<()> {
+        let (r1, r2) = tokio::join!(
+            MySqlLocker::with_locking(
+                &pool,
+                "Cvw8utptkckId0IVIUDj612G00sjJ7O42FeMEfL07VQLYfH3nAq0eYKf60g082ui",
+                Duration::from_secs(2).into(),
+                async |_| {
+                    sleep(Duration::from_secs(1)).await;
+                },
+            ),
+            MySqlLocker::with_locking(
+                &pool,
+                "Cvw8utptkckId0IVIUDj612G00sjJ7O42FeMEfL07VQLYfH3nAq0eYKf60g082ui",
+                Duration::from_secs(2).into(),
+                async |_| {
+                    sleep(Duration::from_secs(1)).await;
+                },
+            )
         );
 
-        Ok(())
-    }
-
-    #[sqlx::test]
-    async fn empty_lock(pool: MySqlPool) -> sqlx::Result<()> {
-        // lock with empty key and 1 sec
-        let guard = MySqlLocker::lock(&pool, "", Some(Duration::from_secs(1))).await;
-        assert_matches!(&guard, Ok(Some(_)),);
-        assert_str_eq!(guard.unwrap().unwrap().text, "");
-
-        // lock again with empty key whicin 1 sec
-        let guard = MySqlLocker::lock(&pool, "", None).await;
-        assert_matches!(&guard, Ok(None),);
-
-        sleep(Duration::from_secs(1)).await;
-
-        // lock with empty key after 1 sec
-        let guard = MySqlLocker::lock(&pool, "", Some(Duration::from_secs(0))).await;
-        assert_matches!(&guard, Ok(Some(_)));
-        assert_str_eq!(guard.unwrap().unwrap().text, "");
-
-        // lock with empty key instantlly
-        let guard = MySqlLocker::lock(&pool, "", Some(Duration::from_secs(0))).await;
-        assert_matches!(&guard, Ok(Some(_)));
-        assert_str_eq!(guard.unwrap().unwrap().text, "");
+        assert_matches!(r1, Ok(()));
+        assert_matches!(r2, Ok(()));
 
         Ok(())
     }
 
     #[sqlx::test]
-    async fn lock_longer_than_64(pool: MySqlPool) -> sqlx::Result<()> {
-        let guard = MySqlLocker::lock(
+    async fn no_wait(pool: MySqlPool) -> sqlx::Result<()> {
+        let (r1, r2) = tokio::join!(
+            MySqlLocker::with_locking(
+                &pool,
+                "LjoiSBmBcdKIng3aBIsf0Yqi8oeTKH1UkRQHfKlFe5fBsDYjhRDEwOwtSUr8ewG3",
+                None,
+                async |_| {
+                    sleep(Duration::from_secs(1)).await;
+                },
+            ),
+            MySqlLocker::with_locking(
+                &pool,
+                "LjoiSBmBcdKIng3aBIsf0Yqi8oeTKH1UkRQHfKlFe5fBsDYjhRDEwOwtSUr8ewG3",
+                None,
+                async |_| {
+                    sleep(Duration::from_secs(1)).await;
+                },
+            )
+        );
+
+        match (&r1, &r2) {
+            (Ok(()), Err(_)) | (Err(_), Ok(())) => {
+                ()
+            }
+            other => panic!("expected one Ok and one FailedToGetLock, got: {:?}", other),
+        }
+
+        let r = MySqlLocker::with_locking(
             &pool,
-            "QcpCXg6KQ6rPWuU6hYntMNrbQupv31fJTcMjcsrnKnRSKektjCD8QS0ImLfgiuKk1",
-            Some(Duration::from_secs(1)),
+            "LjoiSBmBcdKIng3aBIsf0Yqi8oeTKH1UkRQHfKlFe5fBsDYjhRDEwOwtSUr8ewG3",
+            Duration::from_secs(1).into(),
+            async |_| {
+            },
         )
         .await;
 
-        assert_matches!(&guard, Err(_),);
+        assert_matches!(r, Ok(()));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn locck_with_empty_text(pool: MySqlPool) -> sqlx::Result<()> {
+        let r = MySqlLocker::with_locking(&pool, "", Duration::from_secs(1).into(), async |_| {
+            sleep(Duration::from_secs(1)).await;
+        })
+        .await;
+
+        assert_matches!(r, Err(_));
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn lock_with_text_longer_than_64(pool: MySqlPool) -> sqlx::Result<()> {
+        let r = MySqlLocker::with_locking(
+            &pool,
+            "G2l1litxGfagbBWcQUymJ7cqYVyqQFPsr4JoimK4eXMRdN5n8tcofOYUJhEMHcbVH",
+            Duration::from_secs(1).into(),
+            async |_| {
+                sleep(Duration::from_secs(1)).await;
+            },
+        )
+        .await;
+
+        assert_matches!(r, Ok(()));
+
         Ok(())
     }
 }

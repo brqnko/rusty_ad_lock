@@ -9,30 +9,30 @@ pub enum Error {
     #[cfg(feature = "sqlx-mysql")]
     #[error(transparent)]
     Sqlx(#[from] ::sqlx::Error),
+
+    #[cfg(feature = "sqlx-mysql")]
+    #[error("MySQL returned null(insufficient memory or thread interrupted?)")]
+    MySqlReturnedNull,
+    #[cfg(feature = "sqlx-mysql")]
+    #[error("unknown MySQL signal: {0}")]
+    MySqlUnknownSignal(i32),
+
+    #[error("failed to get lock: {0}")]
+    FailedToGetLock(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
-pub struct LockerGuard<'s, 'p, DB: ::sqlx::Database> {
-    pub(crate) text: &'s str,
-    pub(crate) pool: &'p ::sqlx::Pool<DB>,
-}
-
-impl<'s, 'p, DB: ::sqlx::Database> Drop for LockerGuard<'s, 'p, DB> {
-    fn drop(&mut self) {
-        //
-    }
-}
-
-pub trait Locker: Sized {
+pub trait Locker {
     type DB: ::sqlx::Database;
 
-    fn lock<'s, 'p>(
+    fn with_locking<T, F>(
         pool: &::sqlx::Pool<Self::DB>,
-        text: &str,
+        key: &str,
         timeout: Option<std::time::Duration>,
-    ) -> impl Future<Output = Result<Option<LockerGuard<'s, 'p, Self::DB>>>> + Send;
-
-    fn unlock(pool: &::sqlx::Pool<Self::DB>, text: &str) -> impl Future<Output = Result<()>>;
+        f: F,
+    ) -> impl Future<Output = Result<()>>
+    where
+        // FIXME: 長過ぎるわけだけど、トレイトエイリアスパターンを使ってみても微妙だったのでこれでいく
+        F: AsyncFnOnce(&mut ::sqlx::Transaction<'static, Self::DB>) -> T;
 }
