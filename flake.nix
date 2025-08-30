@@ -32,11 +32,12 @@
               clang
             ];
             packages = with pkgs; [
-              mariadb
             ];
             shellHook = ''
             '';
           };
+          shellHook = ''
+          '';
         };
       }
     );
