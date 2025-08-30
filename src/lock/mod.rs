@@ -1,12 +1,9 @@
-#[cfg(feature = "sqlx-mysql")]
 mod sqlx;
-
-#[cfg(feature = "sqlx-mysql")]
 pub use sqlx::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[cfg(feature = "sqlx-mysql")]
+    #[cfg(any(feature = "sqlx-mysql", feature = "sqlx-postgres"))]
     #[error(transparent)]
     Sqlx(#[from] ::sqlx::Error),
 

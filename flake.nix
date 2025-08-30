@@ -32,6 +32,8 @@
               clang
             ];
             packages = with pkgs; [
+              mariadb
+              postgresql_16
             ];
             shellHook = ''
             '';

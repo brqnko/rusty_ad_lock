@@ -1,0 +1,1 @@
+cargo test --features sqlx-mysql,runtime-tokio-rustls -- --no-capture
