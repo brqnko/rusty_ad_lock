@@ -1,0 +1,76 @@
+name: CI
+
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:10.6
+        ports:
+          - '3306:3306'
+        env:
+          MYSQL_DATABASE: testing
+          MYSQL_USER: testing
+          MYSQL_PASSWORD: testing
+          MYSQL_ROOT_PASSWORD: testing
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=30s
+          --health-retries=5
+      postgres:
+        image: postgres:14
+        ports:
+          - '5432:5432'
+        env:
+          POSTGRES_DB: testing
+          POSTGRES_USER: testing
+          POSTGRES_PASSWORD: testing
+        options: >-
+          --health-cmd=pg_isready
+          --health-interval=10s
+          --health-timeout=30s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Test with PostgreSQL
+        run: cargo test --verbose --features sqlx-postgres,runtime-tokio-rustls -- --no-capture
+        env:
+          DATABASE_URL: "postgres://testing:testing@localhost:5432/testing"
+          RUST_LOG: "sqlx=debug"
+
+      - name: Test with Sqlite for std-collection
+        run: cargo test --verbose --features sqlx-std-collection,runtime-tokio-rustls -- --no-capture
+        env:
+          DATABASE_URL: "sqlite::memory:"
+          RUST_LOG: "sqlx=debug"
+
+      - name: Test with MariaDB
+        run: cargo test --verbose --features sqlx-mysql,runtime-tokio-rustls -- --no-capture
+        env:
+          DATABASE_URL: "mysql://root:testing@localhost:3306/testing"
+          RUST_LOG: "sqlx=debug"

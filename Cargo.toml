@@ -13,7 +13,7 @@ tokio = { version = "1.47.1", features = ["rt"], optional = true }
 sqlx-std-collection = ["sqlx"]
 
 sqlx-dep = []
-sqlx-all = ["sqlx-mysql", "sqlx-postgres", "sqlx-dep"]
+sqlx-all = ["sqlx-mysql", "sqlx-postgres", "sqlx-sqlite", "sqlx-std-collection", "sqlx-dep"]
 sqlx-mysql = ["sqlx-dep", "sqlx/mysql", "sha1"]
 sqlx-postgres = ["sqlx-dep", "sqlx/postgres"]
 sqlx-sqlite = ["sqlx-dep", "sqlx/sqlite"]
