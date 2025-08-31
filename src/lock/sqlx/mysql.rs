@@ -15,7 +15,7 @@ impl Locker for MySqlLocker {
     /// * `timeout` - timeout duration. if it can't get lock in 1 sec, with_locking will return Err. if None is given and a conflict occurs, it will fail immediately.
     /// * `f` - closure that executed while the key is locked
     ///
-    /// ```
+    /// ```ignore
     /// let (r1, r2) = tokio::join!(
     ///         MySqlLocker::with_locking(
     ///             &pool,
