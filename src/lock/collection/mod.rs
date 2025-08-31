@@ -1,10 +1,32 @@
-use std::marker::PhantomData;
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    sync::{Arc, LazyLock, Mutex},
+};
 
-use crate::Locker;
+use sqlx::ConnectOptions;
+use tokio::sync::broadcast;
+
+use crate::{Error, Locker};
 
 pub struct StdCollectionLocker<D: sqlx::Database> {
     _marker: PhantomData<D>,
 }
+
+#[derive(Clone, Debug)]
+enum Event {
+    Released { url: Arc<String>, key: Arc<String> },
+}
+
+const CHANNEL_BUFFER_SIZE: usize = 32;
+
+static STATE: LazyLock<Mutex<HashMap<Arc<String>, HashSet<Arc<String>>>>> =
+    LazyLock::new(|| Mutex::default());
+
+static BROADCAST: LazyLock<broadcast::Sender<Event>> = LazyLock::new(|| {
+    let (sx, _rx) = broadcast::channel(CHANNEL_BUFFER_SIZE);
+    sx
+});
 
 impl<D: sqlx::Database> Locker for StdCollectionLocker<D> {
     type DB = D;
@@ -18,7 +40,64 @@ impl<D: sqlx::Database> Locker for StdCollectionLocker<D> {
     where
         F: AsyncFnOnce(&mut sqlx::Transaction<'static, Self::DB>) -> T,
     {
-        todo!()
+        let url = Arc::new(pool.connect_options().to_url_lossy().to_string());
+        let key = Arc::new(key.to_owned());
+
+        let mut tx = pool.begin().await?;
+
+        fn try_lock(url: &Arc<String>, key: &Arc<String>) -> bool {
+            let mut state = STATE.lock().unwrap();
+            state
+                .entry(Arc::clone(url))
+                .or_default()
+                .insert(Arc::clone(key))
+        }
+
+        // まず即時取得を試みる
+        if !try_lock(&url, &key) {
+            // 待たない設定なら即失敗
+            let Some(dur) = timeout else {
+                return Err(Error::FailedToGetLock((*key).to_string()));
+            };
+
+            // 指定期間待って、目的の (url, key) が解放されたら再取得を試みる
+            let mut rx = BROADCAST.subscribe();
+            let acquired = tokio::time::timeout(dur, async {
+                loop {
+                    match rx.recv().await {
+                        Ok(Event::Released { url: u, key: k })
+                            if u.eq(&url) && k.eq(&key) && try_lock(&url, &key) =>
+                        {
+                            break true;
+                        }
+                        Ok(_) => { /* 別のロック解放: 無視 */ }
+                        Err(_) => break false, // チャネルが閉じた等
+                    }
+                }
+            })
+            .await
+            .ok()
+            .unwrap_or(false);
+
+            if !acquired {
+                return Err(Error::FailedToGetLock((*key).to_string()));
+            }
+        }
+
+        f(&mut tx).await;
+
+        // ロックを解除する
+        let mut state = STATE.lock().unwrap();
+        state.get_mut(&url).map(|set| set.remove(&key));
+        drop(state);
+        // ロックを開放したことを送信
+        // NOTE: エラーが来ても、それは受診者が0なことを表しているだけ
+        let _ = BROADCAST.send(Event::Released {
+            url: Arc::clone(&url),
+            key,
+        });
+
+        Ok(())
     }
 }
 
