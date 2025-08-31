@@ -1,10 +1,53 @@
 use crate::{Error, Locker};
 
+/// Advisory lock implementation using PostgreSQL built-in advisor locking functions.
 pub struct PostgresLocker;
 
 impl Locker for PostgresLocker {
     type DB = ::sqlx::Postgres;
 
+    /// execute the given closure while the key is locked
+    ///
+    /// * `pool` - connection pool
+    /// * `key` - key to get locked
+    /// * `timeout` - timeout duration. if it can't get lock in 1 sec, with_locking will return Err. if None is given and a conflict occurs, it will fail immediately.
+    /// * `f` - closure that executed while the key is locked
+    ///
+    /// ```
+    /// let (r1, r2) = tokio::join!(
+    ///         PostgresLocker::with_locking(
+    ///             &pool,
+    ///             "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
+    ///             Duration::from_secs(1).into(),
+    ///             async |_| {
+    ///                 sleep(Duration::from_secs(2)).await;
+    ///             },
+    ///         ),
+    ///         PostgresLocker::with_locking(
+    ///             &pool,
+    ///             "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
+    ///             Duration::from_secs(1).into(),
+    ///             async |_| {
+    ///                 sleep(Duration::from_secs(2)).await;
+    ///             },
+    ///         )
+    ///     );
+    ///
+    ///     match (&r1, &r2) {
+    ///         (Ok(()), Err(_)) | (Err(_), Ok(())) => (),
+    ///         other => panic!("expected one Ok and one FailedToGetLock, got: {:?}", other),
+    ///     }
+    ///
+    ///     let r = PostgresLocker::with_locking(
+    ///         &pool,
+    ///         "ivcK1ms0G8xoI5aA40BMkiI2aVlhyM025EGFv1nJxNIC50pJovn2Vn1i7IKlnqYB",
+    ///         Duration::from_secs(1).into(),
+    ///         async |_| {},
+    ///     )
+    ///     .await;
+    ///
+    ///     assert_matches!(r, Ok(()));
+    /// ```
     async fn with_locking<T, F>(
         pool: &sqlx::Pool<Self::DB>,
         key: &str,
@@ -180,6 +223,17 @@ mod tests {
 
     #[sqlx::test]
     async fn lock_with_text_longer_than_64(pool: PgPool) -> sqlx::Result<()> {
+        let r = PostgresLocker::with_locking(
+            &pool,
+            "G2l1litxGfagbBWcQUymJ7cqYVyqQFPsr4JoimK4eXMRdN5n8tcofOYUJhEMHcbVH",
+            Duration::from_secs(1).into(),
+            async |_| {
+                sleep(Duration::from_secs(1)).await;
+            },
+        )
+        .await;
+
+        assert_matches!(r, Ok(()));
         let r = PostgresLocker::with_locking(
             &pool,
             "G2l1litxGfagbBWcQUymJ7cqYVyqQFPsr4JoimK4eXMRdN5n8tcofOYUJhEMHcbVH",
