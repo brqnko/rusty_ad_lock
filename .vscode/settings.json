@@ -1,4 +1,4 @@
 {
-    "rust-analyzer.cargo.features": ["sqlx-std-collection", "runtime-tokio-rustls"],
+    "rust-analyzer.cargo.features": ["sqlx-mysql", "runtime-tokio-rustls"],
     "rust-analyzer.procMacro.enable": true,
 }

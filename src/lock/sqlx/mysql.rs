@@ -1,3 +1,5 @@
+use sha1::{Digest, Sha1};
+
 use crate::{Error, Locker};
 
 pub struct MySqlLocker;
@@ -14,11 +16,24 @@ impl Locker for MySqlLocker {
     where
         F: AsyncFnOnce(&mut ::sqlx::Transaction<'static, Self::DB>) -> T,
     {
+        fn process_string(s: &str) -> String {
+            if s.len() > 64 {
+                let prefix = &s[..24];
+                let mut hasher = Sha1::new();
+                hasher.update(s.as_bytes());
+                let result = hasher.finalize();
+                let hash_hex = format!("{:x}", result);
+                format!("{}{}", prefix, hash_hex)
+            } else {
+                s.to_string()
+            }
+        }
+
         let mut tx = pool.begin().await?;
 
         let timeout = timeout.unwrap_or_default().as_secs();
         let signal: Option<i32> = sqlx::query_scalar("SELECT GET_LOCK(?,?)")
-            .bind(key)
+            .bind(process_string(key))
             .bind(timeout)
             .fetch_optional(&mut *tx)
             .await?;

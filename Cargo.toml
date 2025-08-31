@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+sha1 = { version = "0.10.6", optional = true }
 sqlx = { version = "0.8.6", optional = true }
 thiserror = "2.0.16"
 tokio = { version = "1.47.1", features = ["rt"], optional = true }
@@ -13,7 +14,7 @@ sqlx-std-collection = ["sqlx"]
 
 sqlx-dep = []
 sqlx-all = ["sqlx-mysql", "sqlx-postgres", "sqlx-dep"]
-sqlx-mysql = ["sqlx-dep", "sqlx/mysql"]
+sqlx-mysql = ["sqlx-dep", "sqlx/mysql", "sha1"]
 sqlx-postgres = ["sqlx-dep", "sqlx/postgres"]
 sqlx-sqlite = ["sqlx-dep", "sqlx/sqlite"]
 

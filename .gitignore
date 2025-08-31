@@ -1,3 +1,4 @@
 /target
 /data
-/.vscode
+/.vscode/settings.json
+/postgres.log
