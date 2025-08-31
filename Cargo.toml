@@ -9,6 +9,8 @@ thiserror = "2.0.16"
 tokio = { version = "1.47.1", features = ["rt"], optional = true }
 
 [features]
+sqlx-std-collection = ["sqlx"]
+
 sqlx-dep = []
 sqlx-all = ["sqlx-mysql", "sqlx-postgres", "sqlx-dep"]
 sqlx-mysql = ["sqlx-dep", "sqlx/mysql"]
@@ -27,5 +29,5 @@ runtime-tokio-rustls = ["sqlx?/runtime-tokio-rustls", "runtime-tokio"]
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1", features = ["unstable"] }
-sqlx = { version = "0.8.6", features = ["macros", "migrate"] }
+sqlx = { version = "0.8.6", features = ["macros", "migrate", "sqlite"] }
 tokio = { version = "1.47.1", features = ["full"] }

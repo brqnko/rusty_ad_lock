@@ -1,8 +1,22 @@
+#[cfg(any(feature = "sqlx-mysql", feature = "sqlx-postgres"))]
 mod sqlx;
+
+#[cfg(any(feature = "sqlx-mysql", feature = "sqlx-postgres"))]
+pub use sqlx::*;
+
+#[cfg(feature = "sqlx-std-collection")]
+mod collection;
+
+#[cfg(feature = "sqlx-std-collection")]
+pub use collection::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[cfg(any(feature = "sqlx-mysql", feature = "sqlx-postgres"))]
+    #[cfg(any(
+        feature = "sqlx-mysql",
+        feature = "sqlx-postgres",
+        feature = "sqlx-std-collection"
+    ))]
     #[error(transparent)]
     Sqlx(#[from] ::sqlx::Error),
 
@@ -19,11 +33,14 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[cfg(any(
+    feature = "sqlx-mysql",
+    feature = "sqlx-postgres",
+    feature = "sqlx-std-collection"
+))]
 pub trait Locker {
-    #[cfg(any(feature = "sqlx-mysql", feature = "sqlx-postgres"))]
     type DB: ::sqlx::Database;
 
-    #[cfg(any(feature = "sqlx-mysql", feature = "sqlx-postgres"))]
     fn with_locking<T, F>(
         pool: &::sqlx::Pool<Self::DB>,
         key: &str,

@@ -1,4 +1,4 @@
 {
-    "rust-analyzer.cargo.features": ["sqlx-postgres", "runtime-tokio"],
+    "rust-analyzer.cargo.features": ["sqlx-std-collection"],
     "rust-analyzer.procMacro.enable": true,
 }

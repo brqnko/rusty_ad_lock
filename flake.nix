@@ -34,6 +34,7 @@
             packages = with pkgs; [
               mariadb
               postgresql
+              sqlite
             ];
             shellHook = ''
             '';
